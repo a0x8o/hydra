@@ -1,5 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 import io
+import json
 import os
 import re
 from pathlib import Path
@@ -7,19 +8,20 @@ from textwrap import dedent
 from typing import Any, NoReturn, Optional
 from unittest.mock import patch
 
-from omegaconf import DictConfig, OmegaConf
-from pytest import mark, param, raises, warns
-
 from hydra import utils
 from hydra._internal.deprecation_warning import deprecation_warning
 from hydra._internal.utils import run_and_report
 from hydra.conf import HydraConf, RuntimeConf
 from hydra.core.hydra_config import HydraConfig
+from hydra.core.override_parser.overrides_parser import OverridesParser
 from hydra.errors import HydraDeprecationError
 from hydra.test_utils.test_utils import (
     assert_multiline_regex_search,
     assert_regex_match,
 )
+
+from omegaconf import DictConfig, OmegaConf
+from pytest import mark, param, raises, warns
 
 
 def test_get_original_cwd(hydra_restore_singletons: Any) -> None:
@@ -74,22 +76,30 @@ def test_to_absolute_path_without_hydra(
 
 
 @mark.parametrize(
-    "obj, expected",
+    "obj",
     [
-        ("foo bar", '"foo bar"'),
-        (10, "10"),
-        ({"foo": '\\"bar'}, '{foo: "\\\\\\"bar"}'),
-        ([1, 2, "3", {"a": "xyz"}], '[1, 2, "3", {a: "xyz"}]'),
+        ("foo bar"),
+        (10),
+        ({"foo": '\\"bar\\\'"'}),
+        ([1, 2, "3", {"a": "xyz"}]),
+        ({"a": 10, "b": "c", "d": {"e": [1, 2, "3"], "f": ["g", {"h": {"i": "j"}}]}}),
         (
-            {"a": 10, "b": "c", "d": {"e": [1, 2, "3"], "f": ["g", {"h": {"i": "j"}}]}},
-            '{a: 10, b: "c", d: {e: [1, 2, "3"], f: ["g", {h: {i: "j"}}]}}',
+            {
+                "a": 10,
+                "b": "c\nnl",
+                "d": {"e": [1, 2, "3"], "f": ["g", {"h": {"i": "j"}}]},
+            }
         ),
+        ({"json_val": json.dumps({"a": 10, "b": "c\\\nnl"}, indent=4)}),
     ],
 )
-def test_to_hydra_override_value_str(
-    hydra_restore_singletons: Any, obj: Any, expected: str
+def test_to_hydra_override_value_str_roundtrip(
+    hydra_restore_singletons: Any, obj: Any
 ) -> None:
-    assert utils.to_hydra_override_value_str(obj) == expected
+    override_str = utils.to_hydra_override_value_str(obj)
+    override_params = f"++ov={override_str}"
+    o = OverridesParser.create().parse_override(override_params)
+    assert o.value() == obj
 
 
 @mark.parametrize(
